@@ -10,7 +10,7 @@ import numpy as np
 
 def get_total_graph(rn):
     src, dst = [], []
-    g = dgl.graph()
+    g = dgl.graph(([], []))
     g.add_nodes(rn.valid_edge_cnt_one)
     for rid in rn.valid_edge:
         for nrid in rn.edgeDict[rid]:
@@ -24,7 +24,7 @@ def get_total_graph(rn):
 
 def get_sub_graphs(rn, max_deps=3):
     num_nodes = rn.valid_edge_cnt_one
-    g = [dgl.graph() for _ in range(num_nodes)]
+    g = [dgl.graph(([], [])) for _ in range(num_nodes)]
     g[0].add_nodes(1)
     g[0] = dgl.add_self_loop(g[0])
     g[0].ndata['id'] = torch.tensor([0])
@@ -64,7 +64,7 @@ def get_sub_graphs(rn, max_deps=3):
 
 
 def empty_graph(add_weight=True):
-    g = dgl.graph()
+    g = dgl.graph(([], []))
     g.add_nodes(1)
     g = dgl.add_self_loop(g)
     g.ndata['id'] = torch.tensor([0])

@@ -106,7 +106,7 @@ def get_gps_subgraph(constraint_mat_src, src_grid_seq, trg_rid, parameters):
     total_g = parameters.g
     gps_subgraph = [empty_graph()]
     for i in range(1, constraint_mat_src.size(0)):
-        sub = dgl.graph()
+        sub = dgl.graph(([], []))
         nodes = torch.where(constraint_mat_src[i] > 0)[0].numpy().tolist()
         if trg_rid[src_grid_seq[i][-1]] not in nodes:
             nodes.append(trg_rid[src_grid_seq[i][-1]].item())
