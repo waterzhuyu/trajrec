@@ -5,12 +5,13 @@ import numpy as np
 from chinese_calendar import is_holiday
 
 from common.trajectory import Trajectory, get_tid
-from .parse_traj import ParseMMTraj
+from .parse_traj import ParseMMTraj_MTraj
 
 class Dataset(torch.utils.data.Dataset):
     def __init__(self, trajs_dir, parameters):
         self.mbr = parameters.mbr
         self.grid_size = parameters.grid_size
+        self.road_grid_size = parameters.road_grid_size
         self.time_span = parameters.time_span
         self.win_size = parameters.win_size
         self.ds_type = parameters.ds_type
@@ -27,7 +28,13 @@ class Dataset(torch.utils.data.Dataset):
         self.get_data(trajs_dir)
         
     def get_data(self, trajs_dir):
-        parser = ParseMMTraj()
+        """
+        get dataset from trajectory files
+        merge multiple seq (Trajectory()) list to seqs
+        Args:
+            trajs_dir (str): directory of trajectory files
+        """
+        parser = ParseMMTraj_MTraj()
         traj_paths = os.listdir(trajs_dir)
         
         for traj_file_name in traj_paths:
@@ -59,10 +66,11 @@ class Dataset(torch.utils.data.Dataset):
                     
                     self.new_tid_seqs.extend(new_tid_seq)
                     
-    
     def parse_traj(self, traj, win_size, ds_type, keep_ratio):
         """
-        parse a trajectory to get source and target sequences
+        parse a trajectory to get dataset
+        the result is a list containing multiple trajectory sequences(xx_seq_ls)
+        each trajectory sequence is parsed into source and target sequences
         Args:
         -----
         traj:
@@ -77,6 +85,20 @@ class Dataset(torch.utils.data.Dataset):
         keep_ratio:
             float. range in (0,1). The ratio that keep GPS points to total points.
         Returns:
+            ls_grid_seq_ls: low sampling src grid sequence list
+            ls_gps_seq_ls: low sampling src gps sequence list
+            feature_seq_ls: low sampling src feature sequence list
+            trg_t_seq_ls: target time sequence list
+            trg_index_seq_ls: target index sequence list
+            trg_grid_seq_ls: target grid sequence list
+            trg_gps_seq_ls: target gps sequence list
+            ls_eid_seq_ls: low sampling src eid sequence list
+            ls_rate_seq_ls: low sampling src rate sequence list
+            ls_road_index_seq_ls: low sampling src road index sequence list
+            mm_gps_seq_ls: map matching result gps sequence list
+            mm_eid_seq_ls: map matching result eid sequence list
+            mm_rate_seq_ls: map matching result rate sequence list
+            new_tid_seq: new tid sequence list
         --------
         
         """
@@ -100,6 +122,9 @@ class Dataset(torch.utils.data.Dataset):
             
             # get target sequence(map matching result)
             mm_gps_seq, mm_eid_seq, mm_rate_seq = self.get_trg_seq(tmp_pt_seq)
+            if mm_eid_seq is None:
+                # if there is no map matching result, then return None, ignore this trajectory
+                return None, None, None, None, None, None, None, None, None, None, None, None, None, None
             
             # get source sequence
             ds_pt_seq = self.downsample_traj(tmp_pt_seq, ds_type, keep_ratio)
@@ -169,13 +194,12 @@ class Dataset(torch.utils.data.Dataset):
         return new_trajs
     
     def get_trg_seq(self, pt_list):
-        mm_gps_seq, mm_eid_seq, mm_rate_seq = [], [], [], []
+        mm_gps_seq, mm_eid_seq, mm_rate_seq = [], [], []
         for pt in pt_list:
-            
-            
             candi_pt = pt.data['candi_pt']
             if candi_pt is None:
-                return None, None, None, None
+                # if there is no map matching result, then return None
+                return None, None, None
             else:
                 mm_gps_seq.append([candi_pt.lat, candi_pt.lng])
                 mm_eid_seq.append(candi_pt.eid)
@@ -210,23 +234,29 @@ class Dataset(torch.utils.data.Dataset):
                 
             assert len(trg_t_seq) == len(trg_index_seq) == len(trg_grid_seq) == len(trg_gps_seq), 'The number of get_trg_grid_t must be equal.'
             
-            for i in range(len(trg_index_seq)):
-                if trg_index_seq[i] == [0]:
-                    # if current point is not in the downsampled point, then interpolate its info
-                    pre_i = i - 1
-                    next_i = i + 1
-                    while True:
-                        if trg_index_seq[pre_i] == [1]:break
-                        pre_i -= 1
-                    while True:
-                        if trg_index_seq[next_i] == [1]:break
-                        next_i += 1
-                    all_interval, cur_interval = next_i - pre_i, i - pre_i
-                    all_lat, all_lng = trg_gps_seq[next_i][0] - trg_gps_seq[pre_i][0], trg_gps_seq[next_i][1] - trg_gps_seq[pre_i][1]
-                    start_lat, start_lng = trg_gps_seq[pre_i][0], trg_gps_seq[pre_i][1]
-                    cur_lat, cur_lng = all_lat / all_interval * cur_interval + start_lat, all_lng / all_interval * cur_interval + start_lng
-                    trg_gps_seq[i] = [cur_lat, cur_lng]
-                    grid_xid, grid_yid = self.gps2grid(mbr=self.mbr, grid_size=self.grid_size, lat=cur_lat, lng=cur_lng)
+        for i in range(len(trg_index_seq)):
+            if trg_index_seq[i] == [0]:
+                # if current point is not in the downsampled point, then interpolate its info
+                pre_i = i - 1
+                next_i = i + 1
+                while True:
+                    if trg_index_seq[pre_i] == [1]:break
+                    pre_i -= 1
+                while True:
+                    if trg_index_seq[next_i] == [1]:break
+                    next_i += 1
+                
+                if pre_i < 0 or next_i >= len(trg_index_seq):
+                    print(f"Warning: Skipping interpolation for index {i} due to boundary issues.")
+                    continue
+                
+                all_interval, cur_interval = next_i - pre_i, i - pre_i
+                all_lat, all_lng = trg_gps_seq[next_i][0] - trg_gps_seq[pre_i][0], trg_gps_seq[next_i][1] - trg_gps_seq[pre_i][1]
+                start_lat, start_lng = trg_gps_seq[pre_i][0], trg_gps_seq[pre_i][1]
+                cur_lat, cur_lng = all_lat / all_interval * cur_interval + start_lat, all_lng / all_interval * cur_interval + start_lng
+                trg_gps_seq[i] = [cur_lat, cur_lng]
+                grid_xid, grid_yid = self.gps2grid(pt=None, mbr=self.mbr, grid_size=self.grid_size, trg_new_grid=True, lat=cur_lat, lng=cur_lng)
+                trg_grid_seq[i] = [grid_xid, grid_yid]
                 
         return  trg_t_seq, trg_index_seq, trg_grid_seq, trg_gps_seq       
     
@@ -251,7 +281,7 @@ class Dataset(torch.utils.data.Dataset):
     def get_src_info_seq(self, pt_list):
         ls_eid_seq, ls_rate_seq, ls_road_index_seq = [], [], []
         for pt in pt_list:
-            road_index_y, road_index_x = self.cal_index_y_x(pt.lat, pt.lng, self.mbr)
+            road_index_y, road_index_x = self.cal_index_y_x(pt.lat, pt.lng, self.mbr, interval=self.road_grid_size)
             ls_road_index_seq.append([pt.time.hour, road_index_y, road_index_x])
             
             if pt.data['candi_pt'] is not None:
