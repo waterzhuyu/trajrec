@@ -21,7 +21,7 @@ class Dataset(torch.utils.data.Dataset):
         self.trg_gps_seqs, self.trg_eid_seqs, self.trg_rate_seqs = [], [], []
         
         self.src_eid_seqs, self.src_rate_seqs, self.src_road_index_seqs = [], [], []
-        self.trg_tid_seqs, self.trg_road_index_seqs, self.trg_interpolated_grid_seqs, self.trg_interpolated_gps_seqs,  = [], [], [], []
+        self.trg_tid_seqs, self.trg_index_seqs, self.trg_interpolated_grid_seqs, self.trg_interpolated_gps_seqs,  = [], [], [], []
         
         self.new_tid_seqs = []
         
@@ -60,7 +60,7 @@ class Dataset(torch.utils.data.Dataset):
                     self.trg_rate_seqs.extend(mm_rate_seq_ls)
                     
                     self.trg_tid_seqs.extend(trg_t_seq_ls)
-                    self.trg_road_index_seqs.extend(trg_index_seq_ls)
+                    self.trg_index_seqs.extend(trg_index_seq_ls)
                     self.trg_interpolated_grid_seqs.extend(trg_grid_seq_ls)
                     self.trg_interpolated_gps_seqs.extend(trg_gps_seq_ls)
                     
@@ -427,6 +427,108 @@ class Dataset(torch.utils.data.Dataset):
             encoded_data[v - 1] = 1
         return encoded_data
     
-def collate_fn(batch):
-    pass
+    def add_token(self, sequence):
+        """
+        Append start element(sos in NLP) for each sequence. And convert each list to tensor.
+        """
+        new_sequence = []
+        dimention = len(sequence[0])
+        sos_token = [0] * dimention
+        new_sequence.append(sos_token)
+        new_sequence.extend(sequence)
+        new_sequence = torch.tensor(new_sequence)
+        return new_sequence
+    
+    def __len__(self):
+        """Denotes the total number of samples"""
+        return len(self.src_grid_seqs)
+    
+    def __getitem__(self, index):
+        """Generates one sample of data"""
+        src_grid_seq = self.src_grid_seqs[index]
+        src_gps_seq = self.src_gps_seqs[index]
+        # src_pro_feas = self.src_pro_feas[index] a trajectory has only one pro feature
         
+        src_eid_seq = self.src_eid_seqs[index]
+        src_rate_seq = self.src_rate_seqs[index]
+        src_road_index_seq = self.src_road_index_seqs[index]
+        
+        trg_gps_seq = self.trg_gps_seqs[index]
+        trg_eid_seq = self.trg_eid_seqs[index]
+        trg_rate_seq = self.trg_rate_seqs[index]
+        
+        
+        trg_t_seq = self.trg_tid_seqs[index]
+        trg_index_seq = self.trg_index_seqs[index]
+        trg_interpolated_gps_seq = self.trg_interpolated_gps_seqs[index]
+        trg_interpolated_grid_seq = self.trg_interpolated_grid_seqs[index]
+        
+        src_pro_feas = torch.tensor(self.src_pro_feas[index])
+        src_grid_seq = self.add_token(src_grid_seq)
+        src_gps_seq = self.add_token(src_gps_seq)
+        src_eid_seq = self.add_token(src_eid_seq)
+        src_rate_seq = self.add_token(src_rate_seq)
+        src_road_index_seq = self.add_token(src_road_index_seq)
+        
+        trg_gps_seq = self.add_token(trg_gps_seq)
+        trg_eid_seq = self.add_token(trg_eid_seq)
+        trg_rate_seq = self.add_token(trg_rate_seq)
+        
+        trg_t_seq = self.add_token(trg_t_seq)
+        trg_index_seq = self.add_token(trg_index_seq)
+        trg_interpolated_gps_seq = self.add_token(trg_interpolated_gps_seq)
+        trg_interpolated_grid_seq = self.add_token(trg_interpolated_grid_seq)
+        
+        return src_grid_seq, src_gps_seq, src_eid_seq, src_rate_seq, src_road_index_seq, src_pro_feas, \
+               trg_gps_seq, trg_eid_seq, trg_rate_seq, trg_t_seq, trg_index_seq, trg_interpolated_gps_seq, trg_interpolated_grid_seq
+        
+        
+def collate_fn(batch):
+    """_summary_
+    Reference: https://github.com/yunjey/seq2seq-dataloader/blob/master/data_loader.py
+    Creates mini-batch tensors from the list of tuples (src_seq, trg_seq).
+    We should build a custom collate_fn rather than using default collate_fn,
+    because merging sequences (including padding) is not supported in default.
+    Sequences are padded to the maximum length of mini-batch sequences (dynamic padding).
+    Args:
+    - batch: list of tuple (src_seq, trg_seq).
+    Returns:
+    - src_seq: tensor of shape (batch_size, src_seq_len, input_size).
+    """
+    
+    def merge(sequences):
+        lengths = [len(seq) for seq in sequences]
+        dim = sequences[0].size(1)
+        padded_seqs = torch.zeros(len(sequences), max(lengths), dim).type_as(sequences[0]) 
+        for i, seq in enumerate(sequences):
+            end = lengths[i]
+            padded_seqs[i, :end, :] = seq[:end, :]
+        return padded_seqs, lengths
+    
+    # sort a list by sequence length (descending order) to use pack_padded_sequence
+    batch.sort(key=lambda x: len(x[0]), reverse=True)
+    
+    # separate source and target sequences
+    src_grid_seqs, src_gps_seqs, src_eid_seqs, src_rate_seqs, src_road_index_seqs, src_pro_feas, \
+    trg_gps_seqs, trg_eid_seqs, trg_rate_seqs, trg_t_seqs, trg_index_seqs, trg_interpolated_gps_seqs, trg_interpolated_grid_seqs = zip(*batch)
+
+    # merge sequences (from tuple of 1D tensor to 2D tensor)
+    src_grid_seqs, src_lengths = merge(src_grid_seqs)
+    src_gps_seqs, _ = merge(src_gps_seqs)
+    src_eid_seqs, _ = merge(src_eid_seqs)
+    src_rate_seqs, _ = merge(src_rate_seqs)
+    src_road_index_seqs, _ = merge(src_road_index_seqs)
+    src_pro_feas = torch.tensor([list(src_pro_fea) for src_pro_fea in src_pro_feas])
+
+    trg_gps_seqs, trg_lengths = merge(trg_gps_seqs)
+    trg_eid_seqs, _ = merge(trg_eid_seqs)
+    trg_rate_seqs, _ = merge(trg_rate_seqs)
+    trg_t_seqs, _ = merge(trg_t_seqs)
+    trg_index_seqs, _ = merge(trg_index_seqs)
+    trg_interpolated_gps_seqs, _ = merge(trg_interpolated_gps_seqs)
+    trg_interpolated_grid_seqs, _ = merge(trg_interpolated_grid_seqs)
+    
+    return src_grid_seqs, src_gps_seqs, src_eid_seqs, src_rate_seqs, src_road_index_seqs, src_pro_feas, \
+           trg_gps_seqs, trg_eid_seqs, trg_rate_seqs, trg_t_seqs, trg_index_seqs, trg_interpolated_gps_seqs, trg_interpolated_grid_seqs, \
+           src_lengths, trg_lengths
+    
