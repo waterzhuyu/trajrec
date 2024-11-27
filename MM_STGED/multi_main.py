@@ -5,7 +5,7 @@ import sys
 import argparse
 import pandas as pd
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+# os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 import torch
 import torch.optim as optim
 import numpy as np
@@ -104,7 +104,7 @@ if __name__ == '__main__':
             'keep_ratio':opts.keep_ratio,
             'grid_size':opts.grid_size,
             'time_span':15,
-            'win_size':25,
+            'win_size':50,
             'ds_type':'uniform',
             'split_flag':False,
             'shuffle':True,
@@ -157,7 +157,8 @@ if __name__ == '__main__':
             'poi_num':5,
             'online_dim':5+5,  # poi/roadnetwork features dim
             'poi_type':'company,food,shopping,viewpoint,house',
-            'user_num': 77499 ,# 17675,
+            # 'user_num': 77499 ,# 17675,
+            'user_num': 62075, #TODO: change this line!
 
             # MBR
             'min_lat':30.655,
@@ -169,7 +170,7 @@ if __name__ == '__main__':
             'keep_ratio':opts.keep_ratio,
             'grid_size':opts.grid_size,
             'time_span':15,
-            'win_size':25,
+            'win_size':50,
             'ds_type':'uniform',
             'split_flag':False,
             'shuffle':True,
@@ -179,7 +180,73 @@ if __name__ == '__main__':
             'hid_dim':opts.hid_dim,
             'id_emb_dim':128,
             'dropout':0.5,
-            'id_size':2902,# 2504+1,
+            'id_size':2902+1,# 2504+1,
+
+            'lambda1':opts.lambda1,
+            'n_epochs':opts.epochs,
+            'top_K': opts.top_K,
+            'RD_inter': opts.RD_inter,
+            'batch_size':128,
+            'learning_rate':1e-3,
+            'tf_ratio':0.5,
+            'clip':1,
+            'log_step':1
+        }
+    elif opts.dataset == 'Xian':
+        args_dict = {
+            'module_type':opts.module_type,
+            'debug':debug,
+            'device':device,
+
+            # pre train
+            'load_pretrained_flag':opts.load_pretrained_flag,
+            'model_old_path':opts.model_old_path,
+            'train_flag':opts.no_train_flag,
+            'test_flag':opts.test_flag,
+
+            # attention
+            'attn_flag':opts.no_attn_flag,
+
+            # constranit
+            'dis_prob_mask_flag':opts.dis_prob_mask_flag,
+            'search_dist':50,
+            'beta':15,
+
+            # features
+            'tandem_fea_flag':opts.tandem_fea_flag,
+            'pro_features_flag':opts.pro_features_flag,
+            'online_features_flag':opts.online_features_flag,
+
+            # extra info module
+            'rid_fea_dim':8,
+            'pro_input_dim':25, # 24[hour] + 5[waether] + 1[holiday]  without weather
+            'pro_output_dim':8,
+            'poi_num':5,
+            'online_dim':5+5,  # poi/roadnetwork features dim
+            'poi_type':'company,food,shopping,viewpoint,house',
+            'user_num': 32135 ,# 17675,
+
+            # MBR
+            'min_lat':34.2,
+            'min_lng':108.92,
+            'max_lat':34.28,
+            'max_lng':109.01,
+
+            # input data params
+            'keep_ratio':opts.keep_ratio,
+            'grid_size':opts.grid_size,
+            'time_span':15,
+            'win_size':50,
+            'ds_type':'uniform',
+            'split_flag':False,
+            'shuffle':True,
+            'input_dim':3,
+
+            # model params
+            'hid_dim':opts.hid_dim,
+            'id_emb_dim':128,
+            'dropout':0.5,
+            'id_size':1964+1,
 
             'lambda1':opts.lambda1,
             'n_epochs':opts.epochs,
@@ -192,20 +259,20 @@ if __name__ == '__main__':
             'log_step':1
         }
     
-    assert opts.dataset in ['Porto', 'Chengdu'], 'Check dataset name if in [Porto, Chengdu]'
+    assert opts.dataset in ['Porto', 'Chengdu', 'Xian'], 'Check dataset name if in [Porto, Chengdu, Xian]'
 
     args.update(args_dict)
 
     print('Preparing data...')
 
-    train_trajs_dir = "./data/{}_full/train_data/".format(opts.dataset)
-    valid_trajs_dir = "./data/{}_full/valid_data/".format(opts.dataset)
-    test_trajs_dir = "./data/{}_full/test_data/".format(opts.dataset)
+    train_trajs_dir = "/workspace/guozuyu/final_data/{}/train_data/".format(opts.dataset)
+    valid_trajs_dir = "/workspace/guozuyu/final_data/{}/valid_data/".format(opts.dataset)
+    test_trajs_dir = "/workspace/guozuyu/final_data/{}/test_data/".format(opts.dataset)
 
-    extra_info_dir = "./data/map/{}/extra_data/".format(opts.dataset)
-    rn_dir = "./data/map/{}/".format(opts.dataset)
+    extra_info_dir = "/workspace/guozuyu/map/{}/extra_data/".format(opts.dataset)
+    rn_dir = "/workspace/guozuyu/map/{}/".format(opts.dataset)
     user_dir = json.load(open( extra_info_dir + "uid2index.json"))
-    SE_file = extra_info_dir + '{}_SE_64.txt'.format(opts.dataset)
+    SE_file = extra_info_dir + '{}_SE_128.txt'.format(opts.dataset)
     condition_file = extra_info_dir + 'flow_new.npy'
     road_file = extra_info_dir + 'graph_A.csv'
 
@@ -395,7 +462,7 @@ if __name__ == '__main__':
 
             if valid_loss < best_valid_loss:
                 best_valid_loss = valid_loss
-                # torch.save(model.state_dict(), model_save_path + 'val-best-model.pt')
+                torch.save(model.state_dict(), model_save_path + 'val-best-model.pt')
 
             if (epoch % args.log_step == 0) or (epoch == args.n_epochs - 1):
                 logging.info('Epoch: ' + str(epoch + 1) + ' Time: ' + str(epoch_mins) + 'm' + str(epoch_secs) + 's')

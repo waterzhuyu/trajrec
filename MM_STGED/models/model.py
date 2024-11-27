@@ -196,7 +196,7 @@ class DecoderMulti(nn.Module):
                           )
         self.user_embedding = nn.Embedding(parameters.user_num, 10)      
         self.user_merge_layer = nn.Sequential(
-            nn.Linear(self.hid_dim + 10 + 64, self.hid_dim)
+            nn.Linear(self.hid_dim + 10 + 128, self.hid_dim)  #TODO: change this line!
         )
         if self.attn_flag:
             self.attn = Attention(parameters)
@@ -335,12 +335,12 @@ class MM_STGED(nn.Module):
             nn.Linear(base_channel, 1)
         )
         self.encoder_out = nn.Sequential(
-            nn.Linear(512+64, 512),
+            nn.Linear(512+128, 512), #TODO: change this line!
             nn.ReLU(inplace=True),
             nn.Linear(512, 512)
         )
         self.encoder_point_cat = nn.Sequential(
-            nn.Linear(512+64, 512),
+            nn.Linear(512+128, 512), #TODO: change this line!
             nn.ReLU(inplace=True),
             nn.Linear(512, 512)
         )
@@ -395,7 +395,7 @@ class MM_STGED(nn.Module):
         # exit()
 
 
-        trajectory_point_road = torch.zeros((max_src_len, batchsize, 64)).to("cuda:0")
+        trajectory_point_road = torch.zeros((max_src_len, batchsize, 128)).to("cuda:0")  #TODO: change this line!
         # dimension = len(sequence[0])
         # start = [0] * dimension  # pad 0 as start of rate sequence
         # new_sequence.append(start)
