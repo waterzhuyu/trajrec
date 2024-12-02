@@ -292,11 +292,12 @@ if __name__ == '__main__':
                         filename=model_save_path + 'log.txt',
                         filemode='a+')
     # spatial embedding
+    #TODO: macro trajectory flow graph
     spatial_A = load_graph_adj_mtx(road_file)
     spatial_A_trans = np.zeros((spatial_A.shape[0]+1, spatial_A.shape[1]+1)) + 1e-10
-    spatial_A_trans[1:,1:] = spatial_A
+    spatial_A_trans[1:,1:] = spatial_A  # (# of road segments + 1, # of segments + 1)
 
-    road_condition = np.load(condition_file) # T, N, N
+    road_condition = np.load(condition_file) # T, N, N (# of grid row, # of grid col, T, feature_size)
     for i in range(road_condition.shape[0]):
         maxn = road_condition[i].max()
         road_condition[i] = road_condition[i] / maxn
@@ -304,7 +305,7 @@ if __name__ == '__main__':
     f = open(SE_file, mode = 'r')
     lines = f.readlines()
     temp = lines[0].split(' ')
-    N, dims = int(temp[0])+1, int(temp[1])
+    N, dims = int(temp[0])+1, int(temp[1])  # num of road segments + 1, feature size
     SE = np.zeros(shape = (N, dims), dtype = np.float32)
     for line in lines[1 :]:
         temp = line.split(' ')
@@ -314,13 +315,13 @@ if __name__ == '__main__':
     SE = torch.from_numpy(SE)
 
     rn = load_rn_shp(rn_dir, is_directed=True)
-    raw_rn_dict = load_rn_dict(extra_info_dir, file_name='raw_rn_dict.json')
-    new2raw_rid_dict = load_rid_freqs(extra_info_dir, file_name='new2raw_rid.json')
-    raw2new_rid_dict = load_rid_freqs(extra_info_dir, file_name='raw2new_rid.json')
-    rn_dict = load_rn_dict(extra_info_dir, file_name='rn_dict.json')
+    raw_rn_dict = load_rn_dict(extra_info_dir, file_name='raw_rn_dict.json')         # query road segment infomation (coords, length, level) by raw rid(str)
+    new2raw_rid_dict = load_rid_freqs(extra_info_dir, file_name='new2raw_rid.json')  # query raw rid by new rid
+    raw2new_rid_dict = load_rid_freqs(extra_info_dir, file_name='raw2new_rid.json')  # query new rid by raw rid
+    rn_dict = load_rn_dict(extra_info_dir, file_name='rn_dict.json')                 # query road segment infomation by rid(int)
 
     mbr = MBR(args.min_lat, args.min_lng, args.max_lat, args.max_lng)
-    grid_rn_dict, max_xid, max_yid = get_rid_grid(mbr, args.grid_size, rn_dict)
+    grid_rn_dict, max_xid, max_yid = get_rid_grid(mbr, args.grid_size, rn_dict)      # query [rid(s)] by grid index
     args_dict['max_xid'] = max_xid
     args_dict['max_yid'] = max_yid
     args.update(args_dict)
@@ -345,7 +346,7 @@ if __name__ == '__main__':
     # load dataset
     train_dataset = Dataset(train_trajs_dir, user_dir, raw2new_rid_dict, mbr=mbr, norm_grid_poi_dict=norm_grid_poi_dict,
                             norm_grid_rnfea_dict=norm_grid_rnfea_dict, weather_dict=weather_dict,
-                            parameters=args, debug=debug)
+                            parameters=args, debug=debug)  # default arguments are set to None
     valid_dataset = Dataset(valid_trajs_dir, user_dir, raw2new_rid_dict, mbr=mbr, norm_grid_poi_dict=norm_grid_poi_dict,
                             norm_grid_rnfea_dict=norm_grid_rnfea_dict, weather_dict=weather_dict,
                             parameters=args, debug=debug)

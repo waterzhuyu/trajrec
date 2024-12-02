@@ -76,7 +76,7 @@ class Dataset(torch.utils.data.Dataset):
         trg_in_gps_seq = self.add_token(trg_in_gps_seq)
 
         use_id_seq = self.uid_seqs[index]
-        return src_grid_seq, src_gps_seq,src_road_index_seq, src_eid_seq, src_rate_seq, trg_in_t_seq, trg_in_index_seq, trg_in_grid_seq, trg_in_gps_seq, \
+        return src_grid_seq, src_gps_seq, src_road_index_seq, src_eid_seq, src_rate_seq, trg_in_t_seq, trg_in_index_seq, trg_in_grid_seq, trg_in_gps_seq, \
         src_pro_fea, trg_gps_seq, trg_rid, trg_rate, use_id_seq
 
     def add_token(self, sequence):
@@ -175,6 +175,7 @@ class Dataset(torch.utils.data.Dataset):
             tmp_pt_list = tr.pt_list
             new_tid_ls.append(tr.tid)
             # get target sequence
+            # 2, 1, 1
             mm_gps_seq, mm_eids, mm_rates = self.get_trg_seq(tmp_pt_list)
             if mm_eids is None:
                 return None, None, None, None, None, None, None, None, None, None, None, None, None, None
@@ -182,10 +183,11 @@ class Dataset(torch.utils.data.Dataset):
             # get source sequence
             ds_pt_list = self.downsample_traj(tmp_pt_list, ds_type, keep_ratio)
             ls_grid_seq, ls_gps_seq, ls_eid_seq, ls_rate_seq, hours, ttl_t, ls_road_index_seq = self.get_src_seq(ds_pt_list, norm_grid_poi_dict, norm_grid_rnfea_dict)
-            features = self.get_pro_features(ds_pt_list, hours, weather_dict)
+            features = self.get_pro_features(ds_pt_list, hours, weather_dict)  # 25
 
 
             # get target sequence time and grid
+            # normalized_t, (one-hot describe that if this idx is in downsampled point list), ([grid idx x, grid idx y]), ([x, y])
             trg_t, trg_index, trg_grid, trg_gps = self.get_trg_grid_t(tmp_pt_list, ds_pt_list)
             # check if src and trg len equal, if not return none
             if len(mm_gps_seq) != ttl_t:
@@ -284,8 +286,8 @@ class Dataset(torch.utils.data.Dataset):
                 trg_grid.append([_lat_grid, _lng_grid])
             else:
                 trg_index.append([0])    
-                trg_grid.append([0,0])
-                trg_gps.append([0,0])
+                trg_grid.append([0, 0])
+                trg_gps.append([0, 0])
             cnt += 1
         # exit()
         assert len(trg_t) == len(trg_grid) == len(trg_index) == len(trg_gps), \
@@ -300,10 +302,13 @@ class Dataset(torch.utils.data.Dataset):
                 pre_i = i - 1
                 next_i = i + 1
                 while True:
-                    if trg_index[pre_i]==[1]:break
+                    # find nearest neighbor non-zero
+                    if trg_index[pre_i]==[1]:
+                        break
                     pre_i -= 1
                 while True:
-                    if trg_index[next_i]==[1]:break
+                    if trg_index[next_i]==[1]:
+                        break
                     next_i += 1
                 all_interval, curr_interval = next_i - pre_i, i - pre_i
                 all_lat, all_lng = trg_gps[next_i][0] - trg_gps[pre_i][0], trg_gps[next_i][1] - trg_gps[pre_i][1]
@@ -311,7 +316,7 @@ class Dataset(torch.utils.data.Dataset):
                 moving_lat, moving_lng = all_lat / all_interval * curr_interval, all_lng / all_interval * curr_interval
                 trg_gps[i] = [start_lat + moving_lat, start_lng + moving_lng]
                 _x, _y = self.gps2grid(i, self.mbr, self.grid_size, trg_new_grid=True, lat=trg_gps[i][0], lng=trg_gps[i][1])
-                trg_grid[i] = [_x,_y]
+                trg_grid[i] = [_x, _y]
         
         return trg_t, trg_index, trg_grid, trg_gps
 
@@ -320,21 +325,33 @@ class Dataset(torch.utils.data.Dataset):
         start_lat = mbr.min_lat
         end_lng = mbr.max_lng
         end_lat = mbr.max_lat
-# mbr.max_lat - mbr.min_lat
+        # mbr.max_lat - mbr.min_lat
         interval = 64
 
         lng_interval = abs(end_lng - start_lng) / interval   
         log_interval = abs(end_lat - start_lat) / interval
-        if lng>=start_lng and lng < end_lng and lat>=start_lat and lat<end_lat:
-            latitude=int(np.floor(abs(lat-start_lat) / log_interval))
-            longitude=int(np.floor(abs(lng-start_lng) / lng_interval))
+        if lng >= start_lng and lng < end_lng and lat >= start_lat and lat < end_lat:
+            latitude = int(np.floor(abs(lat - start_lat) / log_interval))
+            longitude = int(np.floor(abs(lng - start_lng) / lng_interval))
             return longitude, latitude
         else:
             return 0, 0
+
     def get_src_seq(self, ds_pt_list, norm_grid_poi_dict, norm_grid_rnfea_dict):
+        """
+        Returns:
+        ---
+            - ls_grid_seq : (grid idx x, grid idx y, normalized t)
+            - ls_gps_seq :
+            - ls_eid_seq : 
+            - ls_rate_seq :
+            - hours : 
+            - ttl_t : 
+            - ls_road_index_seq : `road condition grid cell`, (hour, road condition idx x, road condition idx y)
+        """
         hours = []
-        ls_grid_seq = []
-        ls_gps_seq = []
+        ls_grid_seq = []  # 3
+        ls_gps_seq = []   # 2
         ls_eid_seq = []
         ls_rate_seq = []
         ls_road_index_seq = []
@@ -342,8 +359,6 @@ class Dataset(torch.utils.data.Dataset):
         last_pt = ds_pt_list[-1]
         time_interval = self.time_span
         ttl_t = self.get_noramlized_t(first_pt, last_pt, time_interval)
-
-
 
         for ds_pt in ds_pt_list:
             # exit()
@@ -358,8 +373,6 @@ class Dataset(torch.utils.data.Dataset):
                 ls_grid_seq.append([locgrid_xid, locgrid_yid, t]+poi_features+rn_features)
             else:
                 ls_grid_seq.append([locgrid_xid, locgrid_yid, t])
-            
-
 
             src_lng_index, src_lat_index = self.cal_index_lng_lat(ds_pt.lng, ds_pt.lat, self.mbr)
             ls_road_index_seq.append([ds_pt.time.hour, src_lng_index, src_lat_index])
@@ -371,26 +384,30 @@ class Dataset(torch.utils.data.Dataset):
             else:
                 ls_eid_seq.append([0])
                 ls_rate_seq.append([0])
-        #对于ls_eid_seq=0的值，使用最近的元素平均替代？
+        # 对于ls_eid_seq=0的值，使用最近的元素平均替代？prefer using previous one, otherwise using next one
         # print(ls_eid_seq)
         for i in range(len(ls_eid_seq)):
-            if ls_eid_seq[i]!=0:continue
+            if ls_eid_seq[i]!=0:
+                continue
             pre_i = i - 1
-            next_i = i+1
+            next_i = i + 1
             while True:
-                if pre_i < 0: pre_i = 0
-                if next_i > len(ls_eid_seq) - 1: next_i = len(ls_eid_seq) - 1
-                if ls_eid_seq[pre_i]!=0:
+                if pre_i < 0:
+                    pre_i = 0
+                if next_i > len(ls_eid_seq) - 1:
+                    next_i = len(ls_eid_seq) - 1
+                if ls_eid_seq[pre_i] != 0:
                     ls_eid_seq[i] = ls_eid_seq[pre_i]
                     ls_rate_seq[i] = ls_rate_seq[pre_i]
                     break
-                if ls_eid_seq[next_i]!=0:
+                if ls_eid_seq[next_i] != 0:
                     ls_eid_seq[i] = ls_eid_seq[next_i]
                     ls_rate_seq[i] = ls_rate_seq[next_i]
                     break
                 pre_i -= 1
                 next_i += 1
-                if pre_i == 0 and next_i == len(ls_eid_seq) - 1:break
+                if pre_i == 0 and next_i == len(ls_eid_seq) - 1:
+                    break
         # print(ls_eid_seq)
         # exit()
         return ls_grid_seq, ls_gps_seq, ls_eid_seq, ls_rate_seq, hours, ttl_t, ls_road_index_seq

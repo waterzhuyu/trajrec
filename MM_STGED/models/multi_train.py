@@ -65,16 +65,17 @@ def train(model, spatial_A_trans, road_condition, SE, iterator, optimizer, log_v
             next_grids = torch.zeros(max_trg_len, batch_size, 3).to(device)
             
         SE = SE.to(device)
-        src_grid_seqs = src_grid_seqs.to(device) # [batch size, src len, 2]
-        src_eid_seqs = src_eid_seqs.to(device)
+        src_grid_seqs = src_grid_seqs.to(device) # [batch size, src len, 3]
+        src_eid_seqs = src_eid_seqs.to(device)   
         src_rate_seqs = src_rate_seqs.to(device)
-        src_road_index_seqs = src_road_index_seqs.long().to(device)
+        src_road_index_seqs = src_road_index_seqs.long().to(device)  # [batch_size, src len, 3]
         trg_in_grid_seqs = trg_in_grid_seqs.to(device)
         trg_rids = trg_rids.permute(1, 0, 2).long().to(device)
         trg_rates = trg_rates.permute(1, 0, 2).to(device)
         trg_in_index_seqs = trg_in_index_seqs.to(device)
         
         road_condition = torch.tensor(road_condition, dtype=torch.float).to(device)
+        #TODO: (batch_size, max_src_len, max_src_len)
         tra_time_A, tra_loca_A = build_graph(src_lengths, src_grid_seqs, src_gps_seqs)
         tra_time_A, tra_loca_A = tra_time_A.to(device), tra_loca_A.to(device)
         spatial_A_trans = torch.tensor(spatial_A_trans, dtype=torch.float).to(device)
@@ -86,7 +87,8 @@ def train(model, spatial_A_trans, road_condition, SE, iterator, optimizer, log_v
         
         start_time = time.time()
         optimizer.zero_grad()
-        output_ids, output_rates = model(use_id_seq, spatial_A_trans, road_condition, src_road_index_seqs, SE, tra_time_A, tra_loca_A, src_lengths, src_grid_seqs, src_eid_seqs, src_rate_seqs, trg_in_grid_seqs, 
+        output_ids, output_rates = model(use_id_seq, spatial_A_trans, road_condition, src_road_index_seqs, SE, 
+                tra_time_A, tra_loca_A, src_lengths, src_grid_seqs, src_eid_seqs, src_rate_seqs, trg_in_grid_seqs, 
                     trg_in_index_seqs, trg_rids, trg_rates, trg_lengths, pre_grids, next_grids, constraint_mat,
                                              src_pro_feas, online_features_dict, rid_features_dict,
                                              teacher_forcing_ratio=0)

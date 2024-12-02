@@ -62,6 +62,12 @@ def calculate_laplacian_matrix(adj_mat, mat_type):
 
 
 def build_graph(src_len, src_grids, src_gps):
+    """
+    Returns:
+    --- 
+        - new_G_time : describe time correlation between timestamp on sequence
+        - new_G_dist : describe dist correlation between timestamp on sequence
+    """
     import time
     start = time.time()
     

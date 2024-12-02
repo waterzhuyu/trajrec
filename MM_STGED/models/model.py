@@ -347,7 +347,8 @@ class MM_STGED(nn.Module):
         self.mygcn = my_GCN(base_channel, base_channel)
         self.device = "cuda:0"
 
-    def forward(self, user_tf_idf, spatial_A_trans, road_condition, src_road_index_seqs, SE, tra_time_A,tra_loca_A,  src_len, src_grid_seqs, src_eid_seqs, src_rate_seqs, trg_in_grid_seqs,
+    def forward(self, user_tf_idf, spatial_A_trans, road_condition, src_road_index_seqs, SE, 
+                tra_time_A, tra_loca_A, src_len, src_grid_seqs, src_eid_seqs, src_rate_seqs, trg_in_grid_seqs,
                 trg_in_index_seqs, trg_rids, trg_rates, trg_len,
                 pre_grids, next_grids, constraint_mat, pro_features, 
                 online_features_dict, rid_features_dict,
@@ -358,9 +359,9 @@ class MM_STGED(nn.Module):
         """Graph-based trajectory encoder"""
         src_attention, src_hidden = self.encoder(src_grid_seqs.permute(1,0,2), src_len, pro_features)
         src_attention = src_attention.permute(1, 0, 2)   # B, T, F
-        src_attention, src_hidden = self.mygcn(src_attention, tra_time_A,tra_loca_A)
+        src_attention, src_hidden = self.mygcn(src_attention, tra_time_A, tra_loca_A)
 
-        """add road """
+        """add road"""
         # _trg_in_index_seqs = trg_in_index_seqs.repeat(1, 1, constraint_mat.shape[2])
         # print(constraint_mat.shape, src_grid_seqs.shape, SE.shape, trg_in_index_seqs.shape)
 
@@ -448,7 +449,8 @@ class MM_STGED(nn.Module):
         else:
             attn_mask = None
 
-        outputs_id, outputs_rate = self.normal_step(SE, user_tf_idf, road_index, spatial_A_trans, trg_in_index_seqs, max_trg_len, batchsize, trg_rids, trg_rates, trg_len,
+        outputs_id, outputs_rate = self.normal_step(SE, user_tf_idf, road_index, spatial_A_trans, trg_in_index_seqs, 
+                                                    max_trg_len, batchsize, trg_rids, trg_rates, trg_len,
                                                     src_attention, src_hidden, attn_mask,
                                                     online_features_dict,
                                                     rid_features_dict,

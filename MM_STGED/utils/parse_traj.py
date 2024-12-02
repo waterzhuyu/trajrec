@@ -140,6 +140,7 @@ class ParseMMTraj_Raw_eid(ParseTraj):
         --------
         trajs:
             list. list of trajectories. trajs contain input_path file's all gps points
+                Trajctory object has a member `pt_list` which is STPoint(). 
         """
         time_format = '%Y/%m/%d %H:%M:%S'
         tid_to_remove = '[:/ ]'
