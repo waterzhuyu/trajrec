@@ -34,16 +34,16 @@ class Edge_merge(nn.Module):
 class my_GCN(nn.Module):
     def __init__(self, in_channel, out_channel):
         super(my_GCN, self).__init__()
-        self.linear1 = nn.Linear(in_channel, out_channel, bias=False)
-        self.linear2 = nn.Linear(in_channel, out_channel, bias=False)
+        self.linear1 = nn.Linear(in_channel, out_channel, bias=False).to('cuda:0')
+        self.linear2 = nn.Linear(in_channel, out_channel, bias=False).to('cuda:0')
         
-        self.wh = nn.Linear(out_channel, out_channel, bias=False)
-        self.wtime = nn.Linear(out_channel, out_channel, bias=False)
-        self.wloca = nn.Linear(out_channel, out_channel, bias=False)
+        self.wh = nn.Linear(out_channel, out_channel, bias=False).to("cuda:0")
+        self.wtime = nn.Linear(out_channel, out_channel, bias=False).to("cuda:0")
+        self.wloca = nn.Linear(out_channel, out_channel, bias=False).to("cuda:0")
         self.bn = nn.BatchNorm1d(out_channel)
         self.relu = nn.ReLU(inplace=True)
         self.edge_merge = Edge_merge(in_channel, 2, out_channel)
-        self.w_edge = nn.Linear(out_channel, out_channel, bias=False)
+        self.w_edge = nn.Linear(out_channel, out_channel, bias=False).to("cuda:0")
     def forward(self, X, A1, A2):
         # X: B,T,F
         # A: B,T,T
@@ -315,14 +315,10 @@ class spatialTemporalConv(nn.Module):
         # print((_start + conv_res).shape)
         return (_start + conv_res).permute(0, 2, 3, 1)
 
-class SharedEmbedding(nn.Module):
-    def __init__(self, num_emb, emb_dim):
-        super().__init__()
-        self.shared_embedding = nn.Parameter(torch.randn(num_emb, emb_dim))
 
 
 class MM_STGED(nn.Module):
-    def __init__(self, encoder, decoder, base_channel, x_id, y_id, top_k):
+    def __init__(self, encoder, decoder, base_channel, num_emb, emb_dim, id_size, x_id, y_id, top_k, pretrain):
         super(MM_STGED, self).__init__()
         self.encoder = encoder  # Encoder
         self.decoder = decoder
@@ -348,15 +344,26 @@ class MM_STGED(nn.Module):
             nn.ReLU(inplace=True),
             nn.Linear(512, 512)
         )
-        self.device = 'cuda:7'
-        self.mygcn = my_GCN(base_channel, base_channel).to(self.device)
+        self.mygcn = my_GCN(base_channel, base_channel)
+        self.device = "cuda"
+
+        self.shared_emb = nn.Parameter(torch.rand(num_emb, emb_dim))
+
+        self.pretrain = pretrain
+
+        if pretrain:
+            self.mlp1 = nn.Linear(num_emb, id_size[0])
+            self.mlp2 = nn.Linear(num_emb, id_size[1])
+        else:
+            self.mlp = nn.Linear(num_emb, id_size)
 
     def forward(self, user_tf_idf, spatial_A_trans, road_condition, src_road_index_seqs, SE, 
                 tra_time_A, tra_loca_A, src_len, src_grid_seqs, src_eid_seqs, src_rate_seqs, trg_in_grid_seqs,
                 trg_in_index_seqs, trg_rids, trg_rates, trg_len,
                 pre_grids, next_grids, constraint_mat, pro_features, 
-                online_features_dict, rid_features_dict,
+                online_features_dict, rid_features_dict, flag,
                 teacher_forcing_ratio=0.5):
+        """flag to identify that city is source A or source B"""
                 
         batchsize, max_src_len, _ = src_grid_seqs.shape
         
@@ -365,69 +372,42 @@ class MM_STGED(nn.Module):
         src_attention = src_attention.permute(1, 0, 2)   # B, T, F
         src_attention, src_hidden = self.mygcn(src_attention, tra_time_A, tra_loca_A)
 
-        """add road"""
-        # _trg_in_index_seqs = trg_in_index_seqs.repeat(1, 1, constraint_mat.shape[2])
-        # print(constraint_mat.shape, src_grid_seqs.shape, SE.shape, trg_in_index_seqs.shape)
+        if self.pretrain:
+            if flag: 
+                shared_emb = self.mlp1(self.shared_emb.transpose())
+            else:
+                shared_emb = self.mlp2(self.shared_emb.transpose())
+        else:
+            shared_emb = self.mlp(self.shared_emb.transpose())
 
-        # tmp_constraint_mat = constraint_mat.permute(1, 0, 2)
-        # tmp_constraint_mat = torch.where(_trg_in_index_seqs==1., tmp_constraint_mat, 0)
+        shared_emb = shared_emb.transpose()  # (id_size, emb_dim)
 
-        # for batch in range(batchsize):
-        #     for time_l in range(constraint_mat.shape[0]):
-        #         if trg_in_index_seqs[batch, time_l, 0] == 1:  #观测到的节点 
-        #             tmp_road_dis = constraint_mat[time_l][batch]
-        #             summ_road = torch.
-        #             print(tmp_road_dis.max())
-                    
-        #             exit()
-        all_road_embed =  torch.einsum('btr,rd->btd',(constraint_mat.permute(1, 0, 2), SE))   # B, T, F
+        """add road embedding"""
+        assert SE.shape(0) == shared_emb.shape(0)
+        SE = torch.cat([SE, shared_emb], dim=-1)  # concat
+
+        all_road_embed =  torch.einsum('btr,rd->btd',(constraint_mat.permute(1, 0, 2), SE))   # B, T, F: (batch_size, max_trg_len, feature_size)
         summ = constraint_mat.permute(1, 0, 2).sum(-1).unsqueeze(-1)
         trajectory_point_embed = all_road_embed / summ   #  得到了每个节点的表示
         
-
         trajectory_point_sum = trg_in_index_seqs.sum(1)
         trajectory_embed = (trajectory_point_embed.sum(1) / trajectory_point_sum).unsqueeze(0)  # 得到每个轨迹的表示
         src_hidden = self.encoder_out(torch.cat((src_hidden, trajectory_embed), -1))   # 轨迹最终表示：路段表示+原始图表示
 
         # 接下来基于节点的表示trajectory_point_embed，将其拼接到GRU输出上
         _trg_in_index_seqs = trg_in_index_seqs.repeat(1, 1, 64)
-        _imput_zero = torch.zeros((batchsize, 64)).to(self.device)
+        _imput_zero = torch.zeros((batchsize, 64)).to("cuda")
         trajectory_point_road = []
 
-        # _traject_i_index = trg_in_index_seqs.repeat(1, 1, 64)
-        # b = trajectory_point_embed[_traject_i_index==1.]
-        # print(b.shape, trg_in_index_seqs.sum())
-        # exit()
-
-
-        trajectory_point_road = torch.zeros((max_src_len, batchsize, 128)).to(self.device)  #TODO: change this line!
-        # dimension = len(sequence[0])
-        # start = [0] * dimension  # pad 0 as start of rate sequence
-        # new_sequence.append(start)
-        # new_sequence.extend(sequence)
-        # new_sequence = torch.tensor(new_sequence)
-
+        trajectory_point_road = torch.zeros((max_src_len, batchsize, 128)).to("cuda")  #TODO: change this line!
 
         for batch in range(batchsize):
-            # print(src_grid_seqs[0])
             _traject_i_index = trg_in_index_seqs[batch,:, 0]
-            # print(_traject_i_index, _traject_i_index.sum())
             b = trajectory_point_embed[batch][_traject_i_index==1.]
             curr_traject_i_length = b.shape[0]
-            # print(b.shape, '....', trajectory_point_road[1:1+curr_traject_i_length, batch].shape, '....', trajectory_point_road.shape)
             trajectory_point_road[1:1+curr_traject_i_length, batch] = b
             
-        # exit()
-        # for time in range(max_src_len):
-        #     tmp_road_embed = torch.where(_trg_in_index_seqs[:,time,]==1., trajectory_point_embed[:, time,], _imput_zero).unsqueeze(0)  # 判断当前点是不是观测点，如果是，则拼到GRU后面
-        #     if time == 0:
-        #         trajectory_point_road = tmp_road_embed
-        #     else:
-        #         trajectory_point_road = torch.cat((trajectory_point_road, tmp_road_embed), 0)
-        
         src_attention = self.encoder_point_cat(torch.cat((src_attention, trajectory_point_road), -1))
-
-
 
         # contextual road condition representation
         road_conv = self.spatialTemporalConv(road_condition)  # T, N, N, F
@@ -483,11 +463,12 @@ class MM_STGED(nn.Module):
         decoder_node2vec = SE[input_id.long()]
         topk_mask = None
         for t in range(1, max_trg_len):
-            trg_index = trg_in_index_seqs[:,t]   #batchsize 
+            trg_index = trg_in_index_seqs[:,t]   #batch size 
             if self.decoder.online_features_flag:
                 online_features = get_dict_info_batch(input_id, online_features_dict).to(self.device)
             else:
                 online_features = torch.zeros((1, batch_size, self.decoder.online_dim))
+
             if self.decoder.tandem_fea_flag:
                 rid_features = get_dict_info_batch(input_id, rid_features_dict).to(self.device)
             else:

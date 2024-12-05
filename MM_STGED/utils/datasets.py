@@ -37,8 +37,6 @@ class Dataset(torch.utils.data.Dataset):
         self.get_data(trajs_dir, user_idx, raw2new_rid, norm_grid_poi_dict, norm_grid_rnfea_dict, weather_dict, parameters.win_size, 
                       parameters.ds_type, parameters.keep_ratio, debug)
         
-        # print(max(self.src_eid_seqs))
-        # exit()
     def __len__(self):
         """Denotes the total number of samples"""
         return len(self.src_grid_seqs)

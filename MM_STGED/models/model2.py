@@ -89,17 +89,6 @@ class Encoder(nn.Module):
         packed_embedded = nn.utils.rnn.pack_padded_sequence(src, src_len)
         packed_outputs, hidden = self.rnn(packed_embedded)
         outputs, _ = nn.utils.rnn.pad_packed_sequence(packed_outputs)
-        # outputs is now a non-packed sequence, all hidden states obtained
-        #  when the input is a pad token are all zeros
-
-        # outputs = [src len, batch size, hid dim * num directions]
-        # hidden = [n layers * num directions, batch size, hid dim]
-
-        # initial decoder hidden is final hidden state of the forwards and backwards
-        #  encoder RNNs fed through a linear layer
-
-        # hidden = [1, batch size, hidden_dim]
-        # outputs = [src len, batch size, hidden_dim * num directions]
             
         if self.pro_features_flag:
             extra_emb = self.extra(pro_features)
@@ -196,7 +185,7 @@ class DecoderMulti(nn.Module):
                           )
         self.user_embedding = nn.Embedding(parameters.user_num, 10)      
         self.user_merge_layer = nn.Sequential(
-            nn.Linear(self.hid_dim + 10 + 128, self.hid_dim)  #TODO: change this line!
+            nn.Linear(self.hid_dim + 10 + 256, self.hid_dim)  #TODO: change this line!
         )
         if self.attn_flag:
             self.attn = Attention(parameters)
@@ -218,23 +207,15 @@ class DecoderMulti(nn.Module):
                 pre_grid, next_grid, constraint_vec, pro_features, online_features, rid_features):
 
         input_id = input_id.squeeze(1).unsqueeze(0)  # cannot use squeeze() bug for batch size = 1
-        # input_id = [1, batch size]
         input_rate = input_rate.unsqueeze(0)
-        # input_rate = [1, batch size, 1]
         embedded = self.dropout(self.emb_id(input_id))
-        # embedded = [1, batch size, emb dim]
 
         if self.attn_flag:
             a = self.attn(hidden, encoder_outputs, attn_mask)
-            # a = [batch size, src len]
             a = a.unsqueeze(1)
-            # a = [batch size, 1, src len]
             encoder_outputs = encoder_outputs.permute(1, 0, 2)
-            # encoder_outputs = [batch size, src len, hid dim * num directions]
             weighted = torch.bmm(a, encoder_outputs)
-            # weighted = [batch size, 1, hid dim * num directions]
             weighted = weighted.permute(1, 0, 2)
-            # weighted = [1, batch size, hid dim * num directions]
 
             if self.online_features_flag:
                 rnn_input = torch.cat((weighted, embedded, input_rate, 
@@ -264,13 +245,10 @@ class DecoderMulti(nn.Module):
                     _tmp_mask = _tmp_mask + spatial_A_trans[id_index]
                 _tmp_mask[_tmp_mask>1] = 1.
                 constraint_vec = torch.where(trg_index_repeat==1, constraint_vec, _tmp_mask)
-                # print(constraint_vec.shape)
-                # exit()
             prediction_id = mask_log_softmax(self.fc_id_out(user_merge.squeeze(0)), 
                                              constraint_vec, log_flag=True)
         else:
             prediction_id = F.log_softmax(self.fc_id_out(user_merge.squeeze(0)), dim=1)
-            # then the loss function should change to nll_loss()
 
         # pre_rate
         max_id = prediction_id.argmax(dim=1).long()
@@ -281,9 +259,6 @@ class DecoderMulti(nn.Module):
             prediction_rate = torch.sigmoid(self.fc_rate_out(torch.cat((rate_input, rid_features), dim=1)))
         else:
             prediction_rate = torch.sigmoid(self.fc_rate_out(rate_input))
-
-        # prediction_id = [batch size, id_size]
-        # prediction_rate = [batch size, 1]
 
         return prediction_id, prediction_rate, hidden
 
@@ -316,13 +291,13 @@ class spatialTemporalConv(nn.Module):
         return (_start + conv_res).permute(0, 2, 3, 1)
 
 class SharedEmbedding(nn.Module):
-    def __init__(self, num_emb, emb_dim):
+    def __init__(self, args):
         super().__init__()
-        self.shared_embedding = nn.Parameter(torch.randn(num_emb, emb_dim))
+        self.shared_embedding = nn.Parameter(torch.randn(args.num_emb, args.emb_dim))
 
 
 class MM_STGED(nn.Module):
-    def __init__(self, encoder, decoder, base_channel, x_id, y_id, top_k):
+    def __init__(self, encoder, decoder, shared_emb, num_emb, id_size, base_channel, x_id, y_id, top_k):
         super(MM_STGED, self).__init__()
         self.encoder = encoder  # Encoder
         self.decoder = decoder
@@ -339,17 +314,20 @@ class MM_STGED(nn.Module):
             nn.Linear(base_channel, 1)
         )
         self.encoder_out = nn.Sequential(
-            nn.Linear(512+128, 512), #TODO: change this line!
+            nn.Linear(512+256, 512), #TODO: change this line!
             nn.ReLU(inplace=True),
             nn.Linear(512, 512)
         )
         self.encoder_point_cat = nn.Sequential(
-            nn.Linear(512+128, 512), #TODO: change this line!
+            nn.Linear(512+256, 512), #TODO: change this line!
             nn.ReLU(inplace=True),
             nn.Linear(512, 512)
         )
-        self.device = 'cuda:7'
-        self.mygcn = my_GCN(base_channel, base_channel).to(self.device)
+        self.mygcn = my_GCN(base_channel, base_channel)
+        self.device = "cuda:7"
+        
+        self.shared_emb = shared_emb
+        self.mlp = nn.Linear(num_emb, id_size)
 
     def forward(self, user_tf_idf, spatial_A_trans, road_condition, src_road_index_seqs, SE, 
                 tra_time_A, tra_loca_A, src_len, src_grid_seqs, src_eid_seqs, src_rate_seqs, trg_in_grid_seqs,
@@ -366,24 +344,13 @@ class MM_STGED(nn.Module):
         src_attention, src_hidden = self.mygcn(src_attention, tra_time_A, tra_loca_A)
 
         """add road"""
-        # _trg_in_index_seqs = trg_in_index_seqs.repeat(1, 1, constraint_mat.shape[2])
-        # print(constraint_mat.shape, src_grid_seqs.shape, SE.shape, trg_in_index_seqs.shape)
+        shared_emb = self.mlp(self.shared_emb.shared_embedding.transpose(0, 1))
+        shared_emb = shared_emb.transpose(0, 1)
+        SE = torch.concat((SE, shared_emb), dim=-1)
 
-        # tmp_constraint_mat = constraint_mat.permute(1, 0, 2)
-        # tmp_constraint_mat = torch.where(_trg_in_index_seqs==1., tmp_constraint_mat, 0)
-
-        # for batch in range(batchsize):
-        #     for time_l in range(constraint_mat.shape[0]):
-        #         if trg_in_index_seqs[batch, time_l, 0] == 1:  #观测到的节点 
-        #             tmp_road_dis = constraint_mat[time_l][batch]
-        #             summ_road = torch.
-        #             print(tmp_road_dis.max())
-                    
-        #             exit()
         all_road_embed =  torch.einsum('btr,rd->btd',(constraint_mat.permute(1, 0, 2), SE))   # B, T, F
         summ = constraint_mat.permute(1, 0, 2).sum(-1).unsqueeze(-1)
         trajectory_point_embed = all_road_embed / summ   #  得到了每个节点的表示
-        
 
         trajectory_point_sum = trg_in_index_seqs.sum(1)
         trajectory_embed = (trajectory_point_embed.sum(1) / trajectory_point_sum).unsqueeze(0)  # 得到每个轨迹的表示
@@ -394,19 +361,7 @@ class MM_STGED(nn.Module):
         _imput_zero = torch.zeros((batchsize, 64)).to(self.device)
         trajectory_point_road = []
 
-        # _traject_i_index = trg_in_index_seqs.repeat(1, 1, 64)
-        # b = trajectory_point_embed[_traject_i_index==1.]
-        # print(b.shape, trg_in_index_seqs.sum())
-        # exit()
-
-
-        trajectory_point_road = torch.zeros((max_src_len, batchsize, 128)).to(self.device)  #TODO: change this line!
-        # dimension = len(sequence[0])
-        # start = [0] * dimension  # pad 0 as start of rate sequence
-        # new_sequence.append(start)
-        # new_sequence.extend(sequence)
-        # new_sequence = torch.tensor(new_sequence)
-
+        trajectory_point_road = torch.zeros((max_src_len, batchsize, 256)).to(self.device)  #TODO: change this line!
 
         for batch in range(batchsize):
             # print(src_grid_seqs[0])
@@ -417,14 +372,6 @@ class MM_STGED(nn.Module):
             # print(b.shape, '....', trajectory_point_road[1:1+curr_traject_i_length, batch].shape, '....', trajectory_point_road.shape)
             trajectory_point_road[1:1+curr_traject_i_length, batch] = b
             
-        # exit()
-        # for time in range(max_src_len):
-        #     tmp_road_embed = torch.where(_trg_in_index_seqs[:,time,]==1., trajectory_point_embed[:, time,], _imput_zero).unsqueeze(0)  # 判断当前点是不是观测点，如果是，则拼到GRU后面
-        #     if time == 0:
-        #         trajectory_point_road = tmp_road_embed
-        #     else:
-        #         trajectory_point_road = torch.cat((trajectory_point_road, tmp_road_embed), 0)
-        
         src_attention = self.encoder_point_cat(torch.cat((src_attention, trajectory_point_road), -1))
 
 

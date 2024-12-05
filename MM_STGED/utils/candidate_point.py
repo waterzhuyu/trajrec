@@ -61,7 +61,6 @@ def cal_candidate_point(raw_pt, rn, edge):
     offset += distance(coords[idx], projection)  # distance of road start position and projected point
     if rn[u][v]['length'] == 0:
         rate = 0
-        # print(u, v)
     else:
         rate = offset/rn[u][v]['length']  # rate of whole road, coor_rate is the rate of coords.
     return CandidatePoint(projection.lat, projection.lng, rn[u][v]['eid'], dist, offset, rate)

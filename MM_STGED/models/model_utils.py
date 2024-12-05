@@ -251,6 +251,8 @@ def get_reachable_inds(pre_grid, cur_grid, grid_rn_dict,time_diff, parameters):
 
 def get_dis_prob_vec(gps, rn, raw2new_rid_dict, parameters):
     """
+    cons_vec for gps, element is "constraint value" of each road segment in search_dist region.
+
     Args:
     -----
     gps: [SPoint, tid]
@@ -271,13 +273,13 @@ def get_constraint_mask(src_grid_seqs, src_gps_seqs, src_lengths, trg_lengths, g
     max_trg_len = max(trg_lengths)
     batch_size = src_grid_seqs.size(0)
 
-    constraint_mat = torch.zeros(batch_size, max_trg_len, parameters.id_size) + 1e-10
+    constraint_mat = torch.zeros(batch_size, max_trg_len, parameters.id_size) + 1e-10  # GPS point affected by each road segment
     pre_grids = torch.zeros(batch_size, max_trg_len, 3)
     cur_grids = torch.zeros(batch_size, max_trg_len, 3)
 
     for bs in range(batch_size):
         # first src gps
-        pre_t = 1
+        pre_t = 1  # start from index 1: 0 is <sos> token
         pre_grid = [int(src_grid_seqs[bs][pre_t][0].tolist()),
                     int(src_grid_seqs[bs][pre_t][1].tolist()),
                     pre_t]
@@ -335,6 +337,93 @@ def get_constraint_mask(src_grid_seqs, src_gps_seqs, src_lengths, trg_lengths, g
     #     new_constraint_list = all_constraint_list[:, ::int(1 / keep_ratio), ]
     # else:
     #     new_constraint_list = torch.cat((all_constraint_list[:, ::int(1 / keep_ratio), ], end_constraint), 1)
+
+    return constraint_mat, pre_grids, cur_grids# , new_constraint_list
+
+
+def get_reachable_inds_demo(pre_grid, cur_grid, grid_rn_dict,time_diff, id_size):
+    reachable_inds = list(range(id_size))
+
+    return reachable_inds
+
+def get_dis_prob_vec_demo(gps, rn, raw2new_rid_dict, id_size, parameters):
+    """
+    cons_vec for gps, element is "constraint value" of each road segment in search_dist region.
+
+    Args:
+    -----
+    gps: [SPoint, tid]
+    """
+    cons_vec = torch.zeros(id_size) + 1e-10
+    candis = get_candidates(gps[0], rn, parameters.search_dist)
+    if candis is not None:
+        for candi_pt in candis:
+            if candi_pt.eid in raw2new_rid_dict.keys():
+                new_rid = raw2new_rid_dict[candi_pt.eid]
+                prob = exp_prob(parameters.beta, candi_pt.error)
+                cons_vec[new_rid] = prob
+    else:
+        cons_vec = torch.ones(id_size)
+    return cons_vec
+
+def get_constraint_mask_demo(src_grid_seqs, src_gps_seqs, src_lengths, trg_lengths, grid_rn_dict, rn, raw2new_rid_dict, id_size, parameters):
+    max_trg_len = max(trg_lengths)
+    batch_size = src_grid_seqs.size(0)
+
+    constraint_mat = torch.zeros(batch_size, max_trg_len, id_size) + 1e-10  # GPS point affected by each road segment
+    pre_grids = torch.zeros(batch_size, max_trg_len, 3)
+    cur_grids = torch.zeros(batch_size, max_trg_len, 3)
+
+    for bs in range(batch_size):
+        # first src gps
+        pre_t = 1  # start from index 1: 0 is <sos> token
+        pre_grid = [int(src_grid_seqs[bs][pre_t][0].tolist()),
+                    int(src_grid_seqs[bs][pre_t][1].tolist()),
+                    pre_t]
+        pre_gps = [SPoint(src_gps_seqs[bs][pre_t][0].tolist(),
+                          src_gps_seqs[bs][pre_t][1].tolist()),
+                   pre_t]
+        pre_grids[bs, pre_t] = torch.tensor(pre_grid)
+        cur_grids[bs, pre_t] = torch.tensor(pre_grid)
+
+        if parameters.dis_prob_mask_flag:
+            cons_vec = get_dis_prob_vec_demo(pre_gps, rn, raw2new_rid_dict, id_size, parameters)
+            constraint_mat[bs][pre_t] = cons_vec
+        else:
+            reachable_inds = get_reachable_inds_demo(pre_grid, pre_grid, grid_rn_dict, 0, id_size)
+            constraint_mat[bs][pre_t][reachable_inds] = 1
+
+        # missed gps
+        for i in range(2, src_lengths[bs]):
+            cur_t = int(src_grid_seqs[bs,i,2].tolist())
+            cur_grid = [int(src_grid_seqs[bs][i][0].tolist()),
+                        int(src_grid_seqs[bs][i][1].tolist()),
+                        cur_t]
+            cur_gps = [SPoint(src_gps_seqs[bs][i][0].tolist(),
+                          src_gps_seqs[bs][i][1].tolist()),
+                       cur_t]
+            pre_grids[bs, cur_t] = torch.tensor(cur_grid)
+            cur_grids[bs, cur_t] = torch.tensor(cur_grid)
+
+            time_diff = cur_t - pre_t
+            reachable_inds = get_reachable_inds_demo(pre_grid, cur_grid, grid_rn_dict, time_diff, id_size)
+
+            for t in range(pre_t+1, cur_t):
+                constraint_mat[bs][t][reachable_inds] = 1
+                pre_grids[bs, t] = torch.tensor(pre_grid)
+                cur_grids[bs, t] = torch.tensor(cur_grid)
+
+            # middle src gps
+            if parameters.dis_prob_mask_flag:
+                cons_vec = get_dis_prob_vec_demo(cur_gps, rn, raw2new_rid_dict, id_size, parameters)
+                constraint_mat[bs][cur_t] = cons_vec
+            else:
+                reachable_inds = get_reachable_inds_demo(cur_grid, cur_grid, grid_rn_dict, 0, id_size)
+                constraint_mat[bs][cur_t][reachable_inds] = 1
+
+            pre_t = cur_t
+            pre_grid = cur_grid
+            pre_gps = cur_gps
 
     return constraint_mat, pre_grids, cur_grids# , new_constraint_list
 

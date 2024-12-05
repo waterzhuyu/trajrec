@@ -7,7 +7,6 @@ import sys
 import argparse
 import pandas as pd
 import os
-# os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 import torch
 import torch.optim as optim
 import numpy as np
@@ -20,7 +19,7 @@ from utils.datasets import Dataset, collate_fn
 from models.model_utils import load_rn_dict, load_rid_freqs, get_rid_grid, get_poi_info, get_rn_info
 from models.model_utils import get_online_info_dict, epoch_time, AttrDict, get_rid_rnfea_dict
 from models.multi_train import evaluate, init_weights, train
-from models.model import MM_STGED, DecoderMulti, Encoder
+from models.model2 import MM_STGED, DecoderMulti, Encoder, SharedEmbedding
 from utils.utils import load_graph_adj_mtx, load_graph_node_features
 import warnings
 import json
@@ -40,6 +39,11 @@ if __name__ == '__main__':
     
     parser = argparse.ArgumentParser(description='Multi-task Traj Interp')
     parser.add_argument('--dataset', type=str, default='Porto',help='data set')
+
+    parser.add_argument('--num_emb', type=int, default=1024)
+    parser.add_argument('--emb_dim', type=int, default=128)
+    parser.add_argument('--finetune_flag', default=False)
+
     parser.add_argument('--module_type', type=str, default='simple', help='module type')
     parser.add_argument('--keep_ratio', type=float, default=0.125, help='keep ratio in float')
     parser.add_argument('--lambda1', type=int, default=10, help='weight for multi task rate')
@@ -131,7 +135,10 @@ if __name__ == '__main__':
             'learning_rate':1e-3,
             'tf_ratio':0.5,
             'clip':1,
-            'log_step':1
+            'log_step':1,
+
+            'num_emb': opts.num_emb,
+            'emb_dim': opts.emb_dim
         }
     elif opts.dataset == 'Chengdu':
         args_dict = {
@@ -198,7 +205,10 @@ if __name__ == '__main__':
             'learning_rate':1e-3,
             'tf_ratio':0.5,
             'clip':1,
-            'log_step':1
+            'log_step':1,
+
+            'num_emb': opts.num_emb,
+            'emb_dim': opts.emb_dim
         }
     elif opts.dataset == 'Xian':
         args_dict = {
@@ -264,7 +274,10 @@ if __name__ == '__main__':
             'learning_rate':1e-3,
             'tf_ratio':0.5,
             'clip':1,
-            'log_step':1
+            'log_step':1,
+
+            'num_emb': opts.num_emb,
+            'emb_dim': opts.emb_dim
         }
     
     assert opts.dataset in ['Porto', 'Chengdu', 'Xian'], 'Check dataset name if in [Porto, Chengdu, Xian]'
@@ -289,7 +302,7 @@ if __name__ == '__main__':
     else:
         fea_flag = False
 
-    model_save_path = './results/'+args.module_type+'_kr_'+str(args.keep_ratio)+'_debug_'+str(args.debug)+\
+    model_save_path = './demo/'+args.module_type+'_kr_'+str(args.keep_ratio)+'_debug_'+str(args.debug)+\
         '_gs_'+str(args.grid_size)+'_lam_'+str(args.lambda1)+\
         '_attn_'+str(args.attn_flag)+'_prob_'+str(args.dis_prob_mask_flag)+\
         '_fea_'+str(fea_flag)+'_'+time.strftime("%Y%m%d_%H%M%S") + '/'
@@ -369,27 +382,12 @@ if __name__ == '__main__':
     valid_subset_indices = torch.randperm(int(len(valid_dataset) * opts.data_ratio)).tolist()
     test_subset_indices = torch.randperm(int(len(test_dataset) * opts.data_ratio)).tolist()
 
-    train_sampler = torch.utils.data.SubsetRandomSampler(train_subset_indices)
-    valid_sampler = torch.utils.data.SubsetRandomSampler(valid_subset_indices)
-    test_sampler = torch.utils.data.SubsetRandomSampler(test_subset_indices)
-
     train_iterator = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, collate_fn=collate_fn,
-                                                num_workers=4, pin_memory=False, sampler=train_sampler)
+                                                num_workers=4, pin_memory=False, shuffle=True)
     valid_iterator = torch.utils.data.DataLoader(valid_dataset, batch_size=args.batch_size, collate_fn=collate_fn,
-                                                num_workers=4, pin_memory=False, sampler=valid_sampler)
+                                                num_workers=4, pin_memory=False, shuffle=True)
     test_iterator = torch.utils.data.DataLoader(test_dataset, batch_size=args.batch_size, collate_fn=collate_fn,
-                                               num_workers=4, pin_memory=False, sampler=test_sampler)
-
-    # train_iterator = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size,
-    #                                              shuffle=args.shuffle, collate_fn=collate_fn,
-    #                                             num_workers=4, pin_memory=False, sampler=train_sampler)
-    # valid_iterator = torch.utils.data.DataLoader(valid_dataset, batch_size=args.batch_size,
-    #                                              shuffle=args.shuffle, collate_fn=collate_fn,
-    #                                             num_workers=4, pin_memory=False, sampler=valid_sampler)
-    # test_iterator = torch.utils.data.DataLoader(test_dataset, batch_size=args.batch_size,
-    #                                             shuffle=args.shuffle, collate_fn=collate_fn,
-    #                                            num_workers=4, pin_memory=False, sampler=test_sampler)
-
+                                               num_workers=4, pin_memory=False, shuffle=True)
     logging.info('Finish data preparing.')
     logging.info('training dataset shape: ' + str(len(train_dataset)))
     logging.info('validation dataset shape: ' + str(len(valid_dataset)))
@@ -404,10 +402,14 @@ if __name__ == '__main__':
 
     enc = Encoder(args)
     dec = DecoderMulti(args)
-    model = MM_STGED(enc, dec, args.hid_dim, args.max_xid, args.max_yid, args.top_K).to(device)
+    shared_emb = SharedEmbedding(args)
+    model = MM_STGED(enc, dec, shared_emb, args.num_emb, args.id_size, args.hid_dim, args.max_xid, args.max_yid, args.top_K).to(device)
     model.apply(init_weights)  # learn how to init weights
     if args.load_pretrained_flag:
         model.load_state_dict(torch.load(args.model_old_path + 'val-best-model.pt'))
+    if opts.finetune_flag:
+        model.encoder.load_state_dict(torch.load(args.model_old_path + 'enc-best-model.pt'))
+        model.shared_emb.load_state_dict(torch.load(args.model_old_path + 'emb-best-model.pt'))
 
     print('model', str(model))
     
@@ -487,6 +489,8 @@ if __name__ == '__main__':
             if valid_loss < best_valid_loss:
                 best_valid_loss = valid_loss
                 torch.save(model.state_dict(), model_save_path + 'val-best-model.pt')
+                torch.save(enc.state_dict(), model_save_path + 'enc-best-model.pt')
+                torch.save(shared_emb.state_dict(), model_save_path + 'emb-best-model.pt')
 
             if (epoch % args.log_step == 0) or (epoch == args.n_epochs - 1):
                 logging.info('Epoch: ' + str(epoch + 1) + ' Time: ' + str(epoch_mins) + 'm' + str(epoch_secs) + 's')
@@ -532,6 +536,7 @@ if __name__ == '__main__':
                 torch.save(model.state_dict(), model_save_path + 'train-mid-model.pt')
                 save_json_data(dict_train_loss, model_save_path, "train_loss.json")
                 save_json_data(dict_valid_loss, model_save_path, "valid_loss.json")
+
 
     if args.test_flag:
         model.load_state_dict(torch.load(model_save_path + 'val-best-model.pt'))
