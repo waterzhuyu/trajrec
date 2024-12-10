@@ -9,6 +9,9 @@ import pandas as pd
 import os
 import torch
 import torch.optim as optim
+
+from torch.utils.tensorboard import SummaryWriter
+
 import numpy as np
 from utils.utils import save_json_data, create_dir, load_pkl_data
 from common.mbr import MBR
@@ -33,6 +36,8 @@ nohup python -u multi_main.py > mmstged0530_Porto.txt 2>&1 &
 
 TODO: 
 nohup python -u multi_main.py --data_ratio 0.2 > baseline_Chengdu0.2 2>&1 &
+
+nohup python -u solution2.py --dataset Xian --data_ratio 0.1 --finetune_flag True --model_old_path /workspace/guozuyu/TrajectoryRecovery/MM_STGED/demo/simple_kr_0.125_debug_False_gs_50_lam_10_attn_True_prob_True_fea_False_20241205_173710 > finetune_Xian_0.1.txt &
 """
 
 if __name__ == '__main__':
@@ -281,7 +286,7 @@ if __name__ == '__main__':
         }
     
     assert opts.dataset in ['Porto', 'Chengdu', 'Xian'], 'Check dataset name if in [Porto, Chengdu, Xian]'
-
+    args_dict['data_ratio'] = opts.data_ratio
     args.update(args_dict)
 
     print('Preparing data...')
@@ -382,12 +387,24 @@ if __name__ == '__main__':
     valid_subset_indices = torch.randperm(int(len(valid_dataset) * opts.data_ratio)).tolist()
     test_subset_indices = torch.randperm(int(len(test_dataset) * opts.data_ratio)).tolist()
 
+    train_sampler = torch.utils.data.SubsetRandomSampler(train_subset_indices)
+    valid_sampler = torch.utils.data.SubsetRandomSampler(valid_subset_indices)
+    test_sampler = torch.utils.data.SubsetRandomSampler(test_subset_indices)
+
     train_iterator = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, collate_fn=collate_fn,
-                                                num_workers=4, pin_memory=False, shuffle=True)
+                                                num_workers=4, pin_memory=False, sampler=train_sampler)
     valid_iterator = torch.utils.data.DataLoader(valid_dataset, batch_size=args.batch_size, collate_fn=collate_fn,
-                                                num_workers=4, pin_memory=False, shuffle=True)
+                                                num_workers=4, pin_memory=False, sampler=valid_sampler)
     test_iterator = torch.utils.data.DataLoader(test_dataset, batch_size=args.batch_size, collate_fn=collate_fn,
-                                               num_workers=4, pin_memory=False, shuffle=True)
+                                               num_workers=4, pin_memory=False, sampler=test_sampler)
+
+    # train_iterator = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, collate_fn=collate_fn,
+    #                                             num_workers=4, pin_memory=False, shuffle=True)
+    # valid_iterator = torch.utils.data.DataLoader(valid_dataset, batch_size=args.batch_size, collate_fn=collate_fn,
+    #                                             num_workers=4, pin_memory=False, shuffle=True)
+    # test_iterator = torch.utils.data.DataLoader(test_dataset, batch_size=args.batch_size, collate_fn=collate_fn,
+    #                                            num_workers=4, pin_memory=False, shuffle=True)
+
     logging.info('Finish data preparing.')
     logging.info('training dataset shape: ' + str(len(train_dataset)))
     logging.info('validation dataset shape: ' + str(len(valid_dataset)))
@@ -416,6 +433,8 @@ if __name__ == '__main__':
     logging.info('model' + str(model))
     with open(model_save_path+'logging.txt', 'a+') as f:
         f.write('model' + str(model) + '\n')
+
+    writer = SummaryWriter()
 
     if args.train_flag:
         ls_train_loss, ls_train_id_acc1, ls_train_id_recall, ls_train_id_precision, \
@@ -537,6 +556,27 @@ if __name__ == '__main__':
                 save_json_data(dict_train_loss, model_save_path, "train_loss.json")
                 save_json_data(dict_valid_loss, model_save_path, "valid_loss.json")
 
+                # Train
+                writer.add_scalar("Loss/Train Loss", train_loss, epoch)
+                writer.add_scalar("Metric/Train RID Acc", train_id_acc1, epoch)
+                writer.add_scalar("Metric/Train RID Recall", train_id_recall, epoch)
+                writer.add_scalar("Metric/Train RID Precision", train_id_precision, epoch)
+                writer.add_scalar("Loss/Train Rate Loss", train_rate_loss, epoch)
+                writer.add_scalar("Loss/Train RID Loss", train_id_loss, epoch)
+
+                # Validate
+                writer.add_scalar("Loss/Valid Loss", valid_loss, epoch)
+                writer.add_scalar("Metric/Valid RID Acc", valid_id_acc1, epoch)
+                writer.add_scalar("Metric/Valid RID Recall", valid_id_recall, epoch)
+                writer.add_scalar("Metric/Valid RID Precision", valid_id_precision, epoch)
+                writer.add_scalar("Loss/Valid Distance MAE Loss", valid_dis_mae_loss, epoch)
+                writer.add_scalar("Loss/Valid Distance RMSE Loss", valid_dis_rmse_loss, epoch)
+                writer.add_scalar("Loss/Valid Distance RN MAE Loss", valid_dis_rn_mae_loss, epoch)
+                writer.add_scalar("Loss/Valid Distance RN RMSE Loss", valid_dis_rn_rmse_loss)
+                writer.add_scalar("Loss/Valid Rate Loss", valid_rate_loss)
+                writer.add_scalar("Loss/Valid RID Loss", valid_id_loss)
+            
+            writer.flush()
 
     if args.test_flag:
         model.load_state_dict(torch.load(model_save_path + 'val-best-model.pt'))
