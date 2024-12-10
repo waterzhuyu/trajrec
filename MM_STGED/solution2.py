@@ -37,7 +37,7 @@ nohup python -u multi_main.py > mmstged0530_Porto.txt 2>&1 &
 TODO: 
 nohup python -u multi_main.py --data_ratio 0.2 > baseline_Chengdu0.2 2>&1 &
 
-nohup python -u solution2.py --dataset Xian --data_ratio 0.1 --finetune_flag True --model_old_path /workspace/guozuyu/TrajectoryRecovery/MM_STGED/demo/simple_kr_0.125_debug_False_gs_50_lam_10_attn_True_prob_True_fea_False_20241205_173710 > finetune_Xian_0.1.txt &
+nohup python -u solution2.py --dataset Xian --data_ratio 0.1 --finetune_flag True --model_old_path /workspace/guozuyu/TrajectoryRecovery/MM_STGED/demo/simple_kr_0.125_debug_False_gs_50_lam_10_attn_True_prob_True_fea_False_20241205_173710/ > finetune_Xian_0.1.txt &
 """
 
 if __name__ == '__main__':
@@ -571,15 +571,15 @@ if __name__ == '__main__':
                 writer.add_scalar("Metric/Valid RID Precision", valid_id_precision, epoch)
                 writer.add_scalar("Loss/Valid Distance MAE Loss", valid_dis_mae_loss, epoch)
                 writer.add_scalar("Loss/Valid Distance RMSE Loss", valid_dis_rmse_loss, epoch)
-                writer.add_scalar("Loss/Valid Distance RN MAE Loss", valid_dis_rn_mae_loss, epoch)
-                writer.add_scalar("Loss/Valid Distance RN RMSE Loss", valid_dis_rn_rmse_loss)
-                writer.add_scalar("Loss/Valid Rate Loss", valid_rate_loss)
-                writer.add_scalar("Loss/Valid RID Loss", valid_id_loss)
+                writer.add_scalar("Loss/Valid Rate Loss", valid_rate_loss, epoch)
+                writer.add_scalar("Loss/Valid RID Loss", valid_id_loss, epoch)
             
             writer.flush()
 
     if args.test_flag:
         model.load_state_dict(torch.load(model_save_path + 'val-best-model.pt'))
+        model.encoder.load_state_dict(torch.load(model_save_path + 'enc-best-model.pt'))
+        model.shared_emb.load_state_dict(torch.load(model_save_path + 'emb-best-model.pt'))
         start_time = time.time()
         test_id_acc1, test_id_recall, test_id_precision, test_dis_mae_loss, test_dis_rmse_loss, \
         test_dis_rn_mae_loss, test_dis_rn_rmse_loss, test_rate_loss, test_id_loss = evaluate(model, spatial_A_trans, road_condition, SE, test_iterator,

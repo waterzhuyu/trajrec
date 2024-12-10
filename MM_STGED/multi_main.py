@@ -551,10 +551,8 @@ if __name__ == '__main__':
                 writer.add_scalar("Metric/Valid RID Precision", valid_id_precision, epoch)
                 writer.add_scalar("Loss/Valid Distance MAE Loss", valid_dis_mae_loss, epoch)
                 writer.add_scalar("Loss/Valid Distance RMSE Loss", valid_dis_rmse_loss, epoch)
-                writer.add_scalar("Loss/Valid Distance RN MAE Loss", valid_dis_rn_mae_loss, epoch)
-                writer.add_scalar("Loss/Valid Distance RN RMSE Loss", valid_dis_rn_rmse_loss)
-                writer.add_scalar("Loss/Valid Rate Loss", valid_rate_loss)
-                writer.add_scalar("Loss/Valid RID Loss", valid_id_loss)
+                writer.add_scalar("Loss/Valid Rate Loss", valid_rate_loss, epoch)
+                writer.add_scalar("Loss/Valid RID Loss", valid_id_loss, epoch)
             
             writer.flush()
 
