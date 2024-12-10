@@ -10,6 +10,7 @@ import os
 # os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 import torch
 import torch.optim as optim
+from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 from utils.utils import save_json_data, create_dir, load_pkl_data
 from common.mbr import MBR
@@ -266,6 +267,7 @@ if __name__ == '__main__':
             'clip':1,
             'log_step':1
         }
+    args_dict['data_ratio'] = opts.data_ratio
     
     assert opts.dataset in ['Porto', 'Chengdu', 'Xian'], 'Check dataset name if in [Porto, Chengdu, Xian]'
 
@@ -401,6 +403,7 @@ if __name__ == '__main__':
         f.write('validation dataset shape: ' + str(len(valid_dataset)) + '\n')
         f.write('test dataset shape: ' + str(len(test_dataset)) + '\n')
 
+    writer = SummaryWriter()
 
     enc = Encoder(args)
     dec = DecoderMulti(args)
@@ -532,6 +535,28 @@ if __name__ == '__main__':
                 torch.save(model.state_dict(), model_save_path + 'train-mid-model.pt')
                 save_json_data(dict_train_loss, model_save_path, "train_loss.json")
                 save_json_data(dict_valid_loss, model_save_path, "valid_loss.json")
+
+                # Train
+                writer.add_scalar("Loss/Train Loss", train_loss, epoch)
+                writer.add_scalar("Metric/Train RID Acc", train_id_acc1, epoch)
+                writer.add_scalar("Metric/Train RID Recall", train_id_recall, epoch)
+                writer.add_scalar("Metric/Train RID Precision", train_id_precision, epoch)
+                writer.add_scalar("Loss/Train Rate Loss", train_rate_loss, epoch)
+                writer.add_scalar("Loss/Train RID Loss", train_id_loss, epoch)
+
+                # Validate
+                writer.add_scalar("Loss/Valid Loss", valid_loss, epoch)
+                writer.add_scalar("Metric/Valid RID Acc", valid_id_acc1, epoch)
+                writer.add_scalar("Metric/Valid RID Recall", valid_id_recall, epoch)
+                writer.add_scalar("Metric/Valid RID Precision", valid_id_precision, epoch)
+                writer.add_scalar("Loss/Valid Distance MAE Loss", valid_dis_mae_loss, epoch)
+                writer.add_scalar("Loss/Valid Distance RMSE Loss", valid_dis_rmse_loss, epoch)
+                writer.add_scalar("Loss/Valid Distance RN MAE Loss", valid_dis_rn_mae_loss, epoch)
+                writer.add_scalar("Loss/Valid Distance RN RMSE Loss", valid_dis_rn_rmse_loss)
+                writer.add_scalar("Loss/Valid Rate Loss", valid_rate_loss)
+                writer.add_scalar("Loss/Valid RID Loss", valid_id_loss)
+            
+            writer.flush()
 
     if args.test_flag:
         model.load_state_dict(torch.load(model_save_path + 'val-best-model.pt'))
