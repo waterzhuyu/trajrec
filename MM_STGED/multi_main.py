@@ -35,6 +35,12 @@ nohup python -u multi_main.py > mmstged0530_Porto.txt 2>&1 &
 
 TODO: 
 nohup python -u multi_main.py --data_ratio 0.2 > baseline_Chengdu0.2 2>&1 &
+
+nohup python -u multi_main.py --dataset Chengdu --data_ratio 1 > baseline_log/baseline_chengdu_pretrain.txt &
+
+ablation study: 
+nohup python -u multi_main.py --dataset Chengdu --data_ratio 1 > ablation_log/ablation_pretrain_chengdu.txt &
+nohup python -u multi_main.py --dataset Porto --data_ratio 1 --finetune_flag True --model_old_path /workspace/guozuyu/TrajectoryRecovery/MM_STGED/ablation_model/simple_kr_0.125_debug_False_gs_50_lam_10_attn_True_prob_True_fea_False_20241211_115847/ > ablation_log/ablation_pretrain_porto.txt &
 """
 
 if __name__ == '__main__':
@@ -63,6 +69,7 @@ if __name__ == '__main__':
     parser.add_argument('--RD_inter', type=str, default='1h', help='路况的时间间隔')
     
     parser.add_argument('--data_ratio', type=float, default=0.1, help='the size ratio of used dataset')
+    parser.add_argument('--finetune_flag', type=bool, default=False)
 
     opts = parser.parse_args()
 
@@ -291,7 +298,7 @@ if __name__ == '__main__':
     else:
         fea_flag = False
 
-    model_save_path = './results/'+args.module_type+'_kr_'+str(args.keep_ratio)+'_debug_'+str(args.debug)+\
+    model_save_path = './ablation_model/'+args.module_type+'_kr_'+str(args.keep_ratio)+'_debug_'+str(args.debug)+\
         '_gs_'+str(args.grid_size)+'_lam_'+str(args.lambda1)+\
         '_attn_'+str(args.attn_flag)+'_prob_'+str(args.dis_prob_mask_flag)+\
         '_fea_'+str(fea_flag)+'_'+time.strftime("%Y%m%d_%H%M%S") + '/'
@@ -403,7 +410,7 @@ if __name__ == '__main__':
         f.write('validation dataset shape: ' + str(len(valid_dataset)) + '\n')
         f.write('test dataset shape: ' + str(len(test_dataset)) + '\n')
 
-    writer = SummaryWriter()
+    writer = SummaryWriter(log_dir='ablation')
 
     enc = Encoder(args)
     dec = DecoderMulti(args)
@@ -411,6 +418,8 @@ if __name__ == '__main__':
     model.apply(init_weights)  # learn how to init weights
     if args.load_pretrained_flag:
         model.load_state_dict(torch.load(args.model_old_path + 'val-best-model.pt'))
+    if opts.finetune_flag:
+        enc.load_state_dict(torch.load(args.model_old_path + 'enc-best-model.pt'))
 
     print('model', str(model))
     
@@ -490,6 +499,7 @@ if __name__ == '__main__':
             if valid_loss < best_valid_loss:
                 best_valid_loss = valid_loss
                 torch.save(model.state_dict(), model_save_path + 'val-best-model.pt')
+                torch.save(enc.state_dict(), model_save_path + 'enc-best-model.pt')
 
             if (epoch % args.log_step == 0) or (epoch == args.n_epochs - 1):
                 logging.info('Epoch: ' + str(epoch + 1) + ' Time: ' + str(epoch_mins) + 'm' + str(epoch_secs) + 's')

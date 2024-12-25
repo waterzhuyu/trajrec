@@ -34,16 +34,16 @@ class Edge_merge(nn.Module):
 class my_GCN(nn.Module):
     def __init__(self, in_channel, out_channel):
         super(my_GCN, self).__init__()
-        self.linear1 = nn.Linear(in_channel, out_channel, bias=False).to('cuda:0')
-        self.linear2 = nn.Linear(in_channel, out_channel, bias=False).to('cuda:0')
+        self.linear1 = nn.Linear(in_channel, out_channel, bias=False)
+        self.linear2 = nn.Linear(in_channel, out_channel, bias=False)
         
-        self.wh = nn.Linear(out_channel, out_channel, bias=False).to("cuda:0")
-        self.wtime = nn.Linear(out_channel, out_channel, bias=False).to("cuda:0")
-        self.wloca = nn.Linear(out_channel, out_channel, bias=False).to("cuda:0")
+        self.wh = nn.Linear(out_channel, out_channel, bias=False)
+        self.wtime = nn.Linear(out_channel, out_channel, bias=False)
+        self.wloca = nn.Linear(out_channel, out_channel, bias=False)
         self.bn = nn.BatchNorm1d(out_channel)
         self.relu = nn.ReLU(inplace=True)
         self.edge_merge = Edge_merge(in_channel, 2, out_channel)
-        self.w_edge = nn.Linear(out_channel, out_channel, bias=False).to("cuda:0")
+        self.w_edge = nn.Linear(out_channel, out_channel, bias=False)
     def forward(self, X, A1, A2):
         # X: B,T,F
         # A: B,T,T
@@ -183,7 +183,7 @@ class DecoderMulti(nn.Module):
         self.online_features_flag = parameters.online_features_flag
         self.tandem_fea_flag = parameters.tandem_fea_flag
 
-        self.emb_id = nn.Embedding(self.id_size, self.id_emb_dim)
+        self.emb_id = nn.Embedding(self.id_size, self.id_emb_dim)  #TODO: Emb id
         self.top_k = parameters.top_K
         rnn_input_dim = self.id_emb_dim + 1 + 64
         fc_id_out_input_dim = self.hid_dim
@@ -209,7 +209,7 @@ class DecoderMulti(nn.Module):
             fc_rate_out_input_dim = self.hid_dim + self.rid_fea_dim
         
         self.rnn = nn.GRU(rnn_input_dim, self.hid_dim)
-        self.fc_id_out = nn.Linear(fc_id_out_input_dim, self.id_size)
+        self.fc_id_out = nn.Linear(fc_id_out_input_dim, self.id_size)  #TODO: id_size
         self.fc_rate_out = nn.Linear(fc_rate_out_input_dim, 1)
         self.dropout = nn.Dropout(parameters.dropout)
         
@@ -221,7 +221,7 @@ class DecoderMulti(nn.Module):
         # input_id = [1, batch size]
         input_rate = input_rate.unsqueeze(0)
         # input_rate = [1, batch size, 1]
-        embedded = self.dropout(self.emb_id(input_id))
+        embedded = self.dropout(self.emb_id(input_id))  #TODO: with arg id_size
         # embedded = [1, batch size, emb dim]
 
         if self.attn_flag:
@@ -316,12 +316,29 @@ class spatialTemporalConv(nn.Module):
         return (_start + conv_res).permute(0, 2, 3, 1)
 
 
+class SharedEmbedding(nn.Module):
+    def __init__(self, args):
+        super().__init__()
+        self.shared_embedding = nn.Parameter(torch.randn(args.num_emb, args.emb_dim))
+
+
+class DecoderHead(nn.Module):
+    def __init__(self, hid_dim, id_size):
+        super().__init__()
+        self.fc_id_out = nn.Linear(hid_dim, id_size)
+        self.fc_rate_out = nn.Linear(hid_dim, 1)
+    
+    def forward(self):
+
+        return 
+
 
 class MM_STGED(nn.Module):
-    def __init__(self, encoder, decoder, base_channel, num_emb, emb_dim, id_size, x_id, y_id, top_k, pretrain):
+    def __init__(self, encoder, decoder, shared_emb, base_channel, num_emb, emb_dim, id_size, x_id, y_id, top_k, pretrain):
         super(MM_STGED, self).__init__()
         self.encoder = encoder  # Encoder
         self.decoder = decoder
+        self.shared_emb = shared_emb
         self.spatialTemporalConv = spatialTemporalConv(1, 64)
         
         self.dropout = nn.Dropout(p=0.3)
@@ -345,7 +362,7 @@ class MM_STGED(nn.Module):
             nn.Linear(512, 512)
         )
         self.mygcn = my_GCN(base_channel, base_channel)
-        self.device = "cuda"
+        self.device = "cuda:7"
 
         self.shared_emb = nn.Parameter(torch.rand(num_emb, emb_dim))
 
@@ -364,7 +381,6 @@ class MM_STGED(nn.Module):
                 online_features_dict, rid_features_dict, flag,
                 teacher_forcing_ratio=0.5):
         """flag to identify that city is source A or source B"""
-                
         batchsize, max_src_len, _ = src_grid_seqs.shape
         
         """Graph-based trajectory encoder"""
@@ -396,13 +412,13 @@ class MM_STGED(nn.Module):
 
         # 接下来基于节点的表示trajectory_point_embed，将其拼接到GRU输出上
         _trg_in_index_seqs = trg_in_index_seqs.repeat(1, 1, 64)
-        _imput_zero = torch.zeros((batchsize, 64)).to("cuda")
+        _imput_zero = torch.zeros((batchsize, 64)).to(self.device)
         trajectory_point_road = []
 
-        trajectory_point_road = torch.zeros((max_src_len, batchsize, 128)).to("cuda")  #TODO: change this line!
+        trajectory_point_road = torch.zeros((max_src_len, batchsize, 128)).to(self.device)  #TODO: change this line!
 
         for batch in range(batchsize):
-            _traject_i_index = trg_in_index_seqs[batch,:, 0]
+            _traject_i_index = trg_in_index_seqs[batch, :, 0]
             b = trajectory_point_embed[batch][_traject_i_index==1.]
             curr_traject_i_length = b.shape[0]
             trajectory_point_road[1:1+curr_traject_i_length, batch] = b
@@ -463,7 +479,7 @@ class MM_STGED(nn.Module):
         decoder_node2vec = SE[input_id.long()]
         topk_mask = None
         for t in range(1, max_trg_len):
-            trg_index = trg_in_index_seqs[:,t]   #batch size 
+            trg_index = trg_in_index_seqs[:, t]   #batch size 
             if self.decoder.online_features_flag:
                 online_features = get_dict_info_batch(input_id, online_features_dict).to(self.device)
             else:
