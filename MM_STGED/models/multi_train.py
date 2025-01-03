@@ -439,8 +439,13 @@ def train_demo4(model, spatial_A_trans, road_condition, SE, iterator, optimizer,
         loss_train_ids = criterion_ce(output_ids, trg_rids)
         loss_rates = criterion_reg(output_rates[1:], trg_rates[1:]) * parameters.lambda1
         #TODO: add fourier regularization
-        f_idloss = Freg(output_ids, trg_rids, trg_in_index_seqs) * parameters.lambda2
-        f_rateloss = Freg(output_rates[1:], trg_rates[1:], trg_in_index_seqs) * parameters.lambda2
+        trg_in_index_seqs = trg_in_index_seqs.permute(1, 0, 2)[1:].reshape(-1)
+
+        id_hat = torch.argmax(output_ids, dim=1)
+        f_idloss = Freg(id_hat, trg_rids, trg_in_index_seqs) * parameters.lambda2
+        print(f_idloss)
+
+        f_rateloss = Freg(output_rates[1:].reshape(-1), trg_rates[1:].reshape(-1), trg_in_index_seqs) * parameters.lambda2
         ttl_loss = loss_train_ids + loss_rates + f_idloss + f_rateloss
         ttl_loss = loss_train_ids + loss_rates
         
@@ -672,6 +677,7 @@ def Freg(y_hat, y, mask):
     # calculate F-reg on batch.eval_mask (True is masked as unobserved)
     y_tilde = torch.where(mask.bool(), y_hat, y)
     y_tilde = torch.fft.fftn(y_tilde)
-    y_tilde = rearrange(y_tilde, 'b s n c -> b (s n c)')
-    f1loss = torch.mean(torch.sum(torch.abs(y_tilde), axis=1) / y_tilde.numel())
+    # y_tilde = rearrange(y_tilde, 'b s n c -> b (s n c)')
+    # f1loss = torch.mean(torch.sum(torch.abs(y_tilde), axis=1) / y_tilde.numel())
+    f1loss = torch.mean(torch.sum(torch.abs(y_tilde), axis=0) / y_tilde.numel())
     return f1loss
